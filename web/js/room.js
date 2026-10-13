@@ -69,8 +69,18 @@ function syncAudio(list) {
 // ---------------------------------------------------------------- deciding who is on screen
 function sync() {
   if (R.noCall) {
-    const big = $('#rm-big'); if (big) big.hidden = true;
-    const note = $('#rm-note'); if (note) note.textContent = 'Live video is off in this browser. For the trainer and other members on camera, open fitvive.club in Safari or Chrome.';
+    // This browser cannot do live video: show who is in the session as name squares, and say why.
+    const big = $('#rm-big'), grid = $('#rm-grid');
+    if (big) big.hidden = true;
+    if (grid) {
+      const people = R.roster.filter((r) => r.user_id !== uid() && (R.info?.isHost ? !r.is_host : true));
+      const tiles = people.slice(0, 12).map((r) => ({ key: r.user_id, name: r.display_name, label: r.is_host ? `${r.display_name} · Trainer` : (R.info?.isHost ? `${r.display_name} · Room ${r.room_no}` : r.display_name) }));
+      tiles.unshift({ key: 'me', cls: 'me', name: 'You' });
+      tiles.forEach((t) => fillTile(ensureTile(grid, t.key, t.cls || ''), t));
+      prune(grid, new Set(tiles.map((t) => t.key)));
+    }
+    const note = $('#rm-note');
+    if (note) { note.hidden = false; note.textContent = 'This browser blocks live video, so you see names instead of cameras. On iPhone, open fitvive.club in Safari to see everyone and be seen.'; }
     return;
   }
   if (!R.call || !R.joined) return;
@@ -457,7 +467,7 @@ export const views = {
       const host = trainerMe || S.profile.role === 'admin';
       const canJoin = host ? st !== 'ended' : st === 'live' || st === 'open';
       const why = st === 'ended' ? 'This session has ended.' : `Join opens 5 minutes before ${fmtTime(session.starts_at)}.`;
-      return `<section class="card glow" style="padding:clamp(20px,4vw,36px)"><div class="eyebrow">${st === 'live' ? 'Live now' : fmtDay(session.starts_at)}</div><h2>${esc(session.title)} with <i>${esc(trainer)}</i></h2><p>${fmtTime(session.starts_at)} · ${session.duration_min} min${session.women_only ? ' · Women only' : ''}</p>${session.video_url ? '<p class="meta">This session has a video to follow. It plays for everyone together from the start time.</p>' : ''}
+      return `<section class="card glow" style="padding:clamp(20px,4vw,36px)"><div class="eyebrow">${st === 'live' ? 'Live now' : fmtDay(session.starts_at)}</div><h2>${esc(session.title)} with <i>${esc(trainer)}</i></h2><p>${fmtTime(session.starts_at)} · ${session.duration_min} min${session.women_only ? ' · Women only' : ''}</p>${session.video_url ? '<p class="meta">This session has a video to follow. It plays for everyone together from the start time.</p>' : ''}${window.RTCPeerConnection ? '' : '<p class="err">This browser blocks live video, so cameras will not show. On iPhone, open fitvive.club in Safari instead.</p>'}
 ${canJoin ? `<label class="check" for="rm-cam"><input type="checkbox" id="rm-cam" ${S.profile.cam_off_default ? '' : 'checked'}><span>Join with my camera on</span></label>
 ${host ? '' : `<label class="check" for="rm-low"><input type="checkbox" id="rm-low" ${S.profile.low_data ? 'checked' : ''}><span>Low-data mode: the trainer and 2 members only</span></label>`}
 <div class="row"><button class="btn gold" data-act="enter">${icon('play')}${trainerMe ? 'Start broadcasting' : host ? 'Join as a host' : 'Join the room'}</button><a class="btn" href="#/timetable">Back</a></div>
