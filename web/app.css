@@ -234,3 +234,36 @@ main.enter>*:nth-child(n+4){animation-delay:.15s}
   .ripple{display:none}
   .btn,.tab,.tilelink{transition:none}
 }
+
+/* ---------------------------------------------------------------- members, profiles, messages */
+.pic{position:relative;flex:none;display:inline-grid;place-items:center;border-radius:50%;background:linear-gradient(135deg,rgba(255,195,31,.28),rgba(255,90,20,.22));border:1px solid var(--line-strong);box-shadow:var(--glow-sm);font:700 16px var(--display);color:var(--gold);text-shadow:var(--tglow)}
+.pic img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+.pic.md{width:48px;height:48px}
+.pic.lg{width:76px;height:76px;font-size:24px}
+.pic.xl{width:120px;height:120px;font-size:38px;box-shadow:var(--glow)}
+.pdot{position:absolute;right:2px;bottom:2px;width:14px;height:14px;border-radius:50%;background:var(--ok);border:2px solid #120806;box-shadow:0 0 10px rgba(123,227,164,.8)}
+.pic.xl .pdot{width:20px;height:20px;right:8px;bottom:8px}
+.pdot.live{background:var(--ember);box-shadow:0 0 12px rgba(255,59,38,.9);animation:pulse 1.8s ease-in-out infinite}
+.hot{color:var(--gold);text-shadow:var(--tglow);font-weight:600}
+.pname{font-weight:700;color:var(--ivory)}
+.pname.big{font:700 clamp(26px,6vw,34px)/1.1 var(--display);margin:0}
+.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.person{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:18px 12px;border-radius:20px;background:var(--panel);border:1px solid var(--line);text-decoration:none;color:inherit;transition:transform .15s,border-color .2s,box-shadow .2s;min-width:0}
+.person:hover,.person:focus-visible{transform:translateY(-3px);border-color:var(--gold);box-shadow:var(--glow-sm)}
+.person:active{transform:scale(.97)}
+.person .meta{font-size:13px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profilehead{flex-direction:row;align-items:center;gap:20px;flex-wrap:wrap}
+.profilehead .meta .ic{width:16px;height:16px;vertical-align:-3px;margin-right:4px}
+.thread{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line);text-decoration:none;color:inherit;min-width:0}
+.thread:last-child{border-bottom:0}
+.thread:hover .pname{color:var(--gold)}
+.tbody{display:flex;flex-direction:column;gap:2px;min-width:0}
+.clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tside{align-items:flex-end;gap:4px;flex:none}
+.badge{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:var(--ember);color:#fff;font:700 12px var(--body);box-shadow:0 0 12px rgba(255,59,38,.7);text-shadow:none}
+.nav a .badge{margin-left:auto}
+.tab .badge{position:absolute;top:4px;left:calc(50% + 6px);min-width:18px;height:18px;font-size:11px;padding:0 5px}
+.chathead{flex-direction:row;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px}
+.chatbox{gap:8px;max-height:min(58vh,520px);overflow-y:auto;padding-right:4px}
+.bubble .btime{display:block;margin-top:4px;font-size:11px;opacity:.7;text-align:right}
+.daysep{align-self:center;font-size:12px;color:var(--muted);padding:2px 12px;border-radius:10px;border:1px solid var(--line);margin:6px 0}

@@ -89,6 +89,10 @@ export async function loadSessions(from, to) {
 
 // ---------------------------------------------------------------- icons (drawn as single paths)
 const ICONS = {
+  chat: 'M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
+  pin: 'M12 21s-6.5-5.8-6.5-11A6.5 6.5 0 0 1 18.5 10c0 5.2-6.5 11-6.5 11zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  camera: 'M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1zM12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z',
+  user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1',
   home: 'M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
   calendar: 'M7 3v3M17 3v3M4 9.5h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
   users: 'M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 10.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM21 20v-1.5a4 4 0 0 0-3-3.85M15.5 3.7a3.5 3.5 0 0 1 0 6.6',
@@ -122,8 +126,11 @@ export function menu() {
   const items = [
     { route: 'home', label: 'Home', icon: 'home', tab: true },
     { route: 'timetable', label: 'Timetable', icon: 'calendar', tab: true },
-    { route: 'partners', label: 'Partners', icon: 'users', tab: true },
-    { route: 'ranking', label: 'Ranking', icon: 'trophy', tab: true },
+    { route: 'members', label: 'Members', icon: 'users', tab: true },
+    { route: 'messages', label: 'Messages', icon: 'chat', tab: true, badge: true },
+    { route: 'profile', label: 'My profile', icon: 'user' },
+    { route: 'partners', label: 'Partners', icon: 'flame' },
+    { route: 'ranking', label: 'Ranking', icon: 'trophy' },
     { route: 'games', label: 'Games', icon: 'bolt' },
     { route: 'membership', label: 'Membership', icon: 'card' },
     { route: 'company', label: 'Company', icon: 'building' },
@@ -178,4 +185,39 @@ export function sessionRow(s) {
   else if (st === 'live' || st === 'open') action = `<a class="btn gold sm" href="#/room/${s.id}">${icon('play')}${host ? 'Open' : 'Join'}</a>`;
   else action = `<span class="opens">Opens ${otherDay}${fmtTime(opensAt)}</span>${host ? `<a class="btn sm" href="#/room/${s.id}">Open early</a>` : ''}`;
   return `<li class="item sess"><div class="when"><b>${fmtTime(start)}</b><span>${s.duration_min} min</span></div><div class="grow"><div class="it">${esc(s.title)} ${st === 'live' ? '<span class="tag live">Live now</span>' : ''} ${s.women_only ? '<span class="tag">Women only</span>' : ''} ${s.company_id ? '<span class="tag">Private</span>' : ''} ${s.video_url ? '<span class="tag warn">Video</span>' : ''}</div><div class="meta">${TYPE_LABEL[s.type] || esc(s.type)} with ${esc(s.trainer_name || 'a trainer to be confirmed')}</div></div>${action}</li>`;
+}
+
+// ---------------------------------------------------------------- members: photos, location, online
+export const NG_STATES = ['Abia', 'Abuja (FCT)', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno', 'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'Gombe', 'Imo', 'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara', 'Outside Nigeria'];
+
+// Profile photos are private to members, so each one is shown through a link that lasts an hour.
+const photoCache = new Map();
+export async function photoUrls(paths) {
+  const now = Date.now();
+  const need = [...new Set(paths.filter(Boolean))].filter((p) => !(photoCache.get(p)?.until > now));
+  if (need.length) {
+    try {
+      const { data } = await sb.storage.from('avatars').createSignedUrls(need, 3600);
+      (data || []).forEach((d) => { if (d.signedUrl) photoCache.set(d.path, { url: d.signedUrl, until: now + 3300 * 1000 }); });
+    } catch { /* show initials instead */ }
+  }
+  return (p) => (p && photoCache.get(p)?.url) || '';
+}
+
+export function avatar(card, url, size = 'md') {
+  const dot = card.live ? '<span class="pdot live" title="Training live now"></span>' : card.online ? '<span class="pdot" title="Online now"></span>' : '';
+  return `<span class="pic ${size}">${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : `<span>${esc(ini(card.display_name || card.name || ''))}</span>`}${dot}</span>`;
+}
+
+export function placeOf(c) { return [c.area, c.state].filter(Boolean).join(', '); }
+
+export function seen(c) {
+  if (c.live) return 'Training live now';
+  if (c.online) return 'Online now';
+  if (!c.last_active) return '';
+  const min = Math.round((Date.now() - new Date(c.last_active).getTime()) / 60000);
+  if (min < 60) return `Active ${min} min ago`;
+  if (min < 1440) return `Active ${Math.round(min / 60)} h ago`;
+  const d = Math.round(min / 1440);
+  return d < 30 ? `Active ${d} ${d === 1 ? 'day' : 'days'} ago` : '';
 }

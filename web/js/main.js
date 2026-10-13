@@ -4,8 +4,9 @@ import { views as publicViews } from './public.js';
 import { views as memberViews } from './member.js';
 import { views as roomViews } from './room.js';
 import { views as staffViews } from './staff.js';
+import { views as socialViews } from './social.js';
 
-const VIEWS = { ...publicViews, ...memberViews, ...roomViews, ...staffViews };
+const VIEWS = { ...publicViews, ...memberViews, ...roomViews, ...staffViews, ...socialViews };
 const main = $('#main');
 const cur = { key: '', params: [], data: null, cleanup: null, token: 0 };
 
@@ -43,19 +44,22 @@ function resolve() {
 function drawChrome() {
   const approved = !!(S.session && S.profile?.status === 'approved' && !S.recovery);
   const here = location.hash.replace(/^#\/?/, '') || (approved ? 'home' : '');
-  const at = (route) => (here === route || here.startsWith(route + '/') ? 'aria-current="page"' : '');
+  // A conversation belongs under Messages, a member's profile under Members.
+  const tabHere = here.replace(/^chat(\/|$)/, 'messages$1').replace(/^member\//, 'members/');
+  const at = (route) => (tabHere === route || tabHere.startsWith(route + '/') ? 'aria-current="page"' : '');
   const items = approved ? menu() : [];
 
   // side menu on wide screens
+  const badge = (m) => (m.badge && S.unread ? `<span class="badge">${S.unread > 99 ? '99+' : S.unread}</span>` : '');
   $('#nav').innerHTML = items.map((m) => (m.group
     ? `<div class="navlabel">${m.group}</div>`
-    : `<a href="#/${m.route}" ${at(m.route)}>${icon(m.icon)}${m.label}</a>`)).join('');
+    : `<a href="#/${m.route}" ${at(m.route)}>${icon(m.icon)}${m.label}${badge(m)}</a>`)).join('');
 
   // bottom tab bar on phones: four main screens, and More for the rest
   const tabs = items.filter((m) => m.tab);
-  const inMore = approved && !tabs.some((m) => here === m.route || here.startsWith(m.route + '/')) && !/^(room|call)\b/.test(here);
+  const inMore = approved && !tabs.some((m) => tabHere === m.route || tabHere.startsWith(m.route + '/')) && !/^(room|call)\b/.test(here);
   $('#tabbar').innerHTML = approved
-    ? tabs.map((m) => `<a class="tab" href="#/${m.route}" ${at(m.route)}>${icon(m.icon)}${m.label}</a>`).join('')
+    ? tabs.map((m) => `<a class="tab" href="#/${m.route}" ${at(m.route)}>${icon(m.icon)}${m.label}${badge(m)}</a>`).join('')
       + `<a class="tab" href="#/more" ${inMore ? 'aria-current="page"' : ''}>${icon('grid')}More</a>`
     : '';
   document.body.dataset.tabs = approved ? '1' : '0';
@@ -65,7 +69,7 @@ function drawChrome() {
   const initials = name.trim().split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase() || '?';
   $('#topright').innerHTML = S.session
     ? (approved
-      ? `<a class="chip" href="#/settings" aria-label="Settings for ${esc(name)}"><span class="who wide-only">${esc(name)}</span><span class="dot" aria-hidden="true">${esc(initials)}</span></a><button class="btn sm wide-only" data-act="signout">Log out</button>`
+      ? `<a class="chip" href="#/profile" aria-label="Profile of ${esc(name)}"><span class="who wide-only">${esc(name)}</span><span class="dot" aria-hidden="true">${esc(initials)}</span></a><button class="btn sm wide-only" data-act="signout">Log out</button>`
       : '<button class="btn sm" data-act="signout">Log out</button>')
     : (configured ? '<a class="btn sm" href="#/login">Log in</a>' : '');
   drawBanner();
@@ -207,6 +211,37 @@ function watchInvites() {
     .subscribe();
 }
 
+// ---------------------------------------------------------------- online status and new messages
+let presenceTimer = 0;
+let dmChannel = null;
+async function countUnread() {
+  try { S.unread = await q(sb.rpc('unread_count')) || 0; } catch { S.unread = 0; }
+  drawChrome();
+}
+app.unread = countUnread;
+function watchSocial() {
+  clearInterval(presenceTimer);
+  if (dmChannel) { sb.removeChannel(dmChannel); dmChannel = null; }
+  S.unread = 0;
+  if (!uid() || S.profile?.status !== 'approved') return;
+  const ping = () => { if (document.visibilityState === 'visible') sb.rpc('touch').then(() => {}, () => {}); };
+  ping();
+  presenceTimer = setInterval(ping, 60000);
+  countUnread();
+  dmChannel = sb.channel('dm-in-' + uid())
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages', filter: `recipient_id=eq.${uid()}` }, async (p) => {
+      const inThisChat = cur.key === 'chat' && cur.params[0] === p.new.sender_id;
+      if (!inThisChat) {
+        let name = 'A member';
+        try { name = (await q(sb.from('member_cards').select('display_name').eq('id', p.new.sender_id).maybeSingle()))?.display_name || name; } catch { /* keep default */ }
+        if (cur.key !== 'messages') toast(`New message from ${name}`);
+      }
+      countUnread();
+    })
+    .subscribe();
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.profile?.status === 'approved') sb.rpc('touch').then(() => {}, () => {}); });
+
 // ---------------------------------------------------------------- returning from Paystack
 async function finishPayment() {
   const params = new URLSearchParams(location.search);
@@ -227,7 +262,7 @@ async function start() {
   S.session = data.session;
   try { await loadProfile(); } catch (err) { toast(friendly(err.message)); }
   await finishPayment();
-  watchInvites();
+  watchInvites(); watchSocial();
   await show();
 
   sb.auth.onAuthStateChange((event, session) => {
@@ -238,7 +273,7 @@ async function start() {
     // Supabase asks that no database calls run inside this callback, so defer them.
     setTimeout(async () => {
       try { await loadProfile(); } catch (err) { toast(friendly(err.message)); }
-      watchInvites();
+      watchInvites(); watchSocial();
       if (!session && location.hash !== '#/') { location.hash = '#/'; return; }
       if (session && ['', '#/', '#/login', '#/apply'].includes(location.hash)) { location.hash = '#/home'; return; }
       await show();
