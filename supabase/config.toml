@@ -1,0 +1,15 @@
+# Used only if you deploy the functions with the Supabase command line tool.
+# Paystack calls the webhook without a Fitvive login, so that one function skips the login check
+# and verifies Paystack's signature instead.
+
+[functions.video-token]
+verify_jwt = true
+
+[functions.paystack-init]
+verify_jwt = true
+
+[functions.paystack-verify]
+verify_jwt = true
+
+[functions.paystack-webhook]
+verify_jwt = false

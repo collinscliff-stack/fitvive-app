@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080405">
+<meta name="description" content="Fitvive is a members-only online fitness club. Work out live with a trainer and other members, wherever you are.">
+<title>Fitvive</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400..900;1,8..60,400..900&family=Instrument+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="bg" aria-hidden="true"></div>
+<header class="top"><div class="bar">
+  <a class="mark" href="#/">Fit<i>vive</i></a>
+  <span id="topright" class="row" style="flex-wrap:nowrap"></span>
+</div></header>
+<div class="shell">
+  <nav class="nav" id="nav" aria-label="Screens"></nav>
+  <div class="content"><div id="banner"></div><main id="main"><p class="meta">Loading Fitvive…</p></main></div>
+</div>
+<nav class="tabbar" id="tabbar" aria-label="Main screens"></nav>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<!-- Your project keys. Edit config.js, not this file. -->
+<script src="config.js"></script>
+<!-- Libraries: the database client and the live video client. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script crossorigin src="https://unpkg.com/@daily-co/daily-js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
