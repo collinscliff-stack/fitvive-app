@@ -265,6 +265,12 @@ function drawRepPanel() {
     if (el) el.innerHTML = '';
     return;
   }
+  if (R.info?.isHost) {
+    // The trainer leads; members count. The trainer sees every room's scores here.
+    el.innerHTML = `<section class="card rep-card"><h3>Rep counter</h3><p class="meta">Members pick an exercise and tap Start counting on their own phones. Their counts appear here live, from every room.</p><div id="rm-rep-leaderboard"></div></section>`;
+    updateRepPanel();
+    return;
+  }
   el.innerHTML = `<section class="card rep-card">
     <h3>Rep counter</h3>
     <p class="meta">Choose an exercise, then start counting. Pose detection runs on this phone; only your exercise and count are shared. Keep your camera on and position your full body in view.</p>
