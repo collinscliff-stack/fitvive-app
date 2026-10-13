@@ -12,7 +12,7 @@ export const setPendingCall = (pass) => { pending = pass; };
 const fresh = () => ({
   kind: '', call: null, joined: false, sessionId: null, session: null, info: null, roster: [], lowData: false,
   mic: false, cam: true, rot: 0, called: {}, reporting: null, timers: [], channels: [], subs: {}, recvKey: '',
-  raf: 0, reps: 0, theirReps: 0, partnerName: '', wake: null,
+  raf: 0, reps: 0, theirReps: 0, partnerName: '', wake: null, noCall: false,
   yt: null, ytId: '', ytReady: false, ytCheck: 0, skew: 0,
 });
 const R = fresh();
@@ -68,6 +68,11 @@ function syncAudio(list) {
 
 // ---------------------------------------------------------------- deciding who is on screen
 function sync() {
+  if (R.noCall) {
+    const big = $('#rm-big'); if (big) big.hidden = true;
+    const note = $('#rm-note'); if (note) note.textContent = 'Live video is off in this browser. For the trainer and other members on camera, open fitvive.club in Safari or Chrome.';
+    return;
+  }
   if (!R.call || !R.joined) return;
   const all = R.call.participants();
   const local = all.local;
@@ -162,9 +167,9 @@ function drawHead() {
 function drawControls() {
   const el = $('#rm-controls'); if (!el) return;
   const member = R.kind === 'session' && !R.info.isHost;
-  el.innerHTML = `<button class="btn sm" aria-pressed="${R.mic}" data-act="mic">${icon(R.mic ? 'mic' : 'micoff')}${R.mic ? 'Mic on' : 'Mic off'}</button>
-<button class="btn sm" aria-pressed="${R.cam}" data-act="cam">${icon(R.cam ? 'video' : 'videooff')}${R.cam ? 'Camera on' : 'Camera off'}</button>
-${member ? `<button class="btn sm" aria-pressed="${R.lowData}" data-act="low">${icon('signal')}Low-data mode</button>` : ''}
+  el.innerHTML = `${R.noCall ? '' : `<button class="btn sm" aria-pressed="${R.mic}" data-act="mic">${icon(R.mic ? 'mic' : 'micoff')}${R.mic ? 'Mic on' : 'Mic off'}</button>
+<button class="btn sm" aria-pressed="${R.cam}" data-act="cam">${icon(R.cam ? 'video' : 'videooff')}${R.cam ? 'Camera on' : 'Camera off'}</button>`}
+${member && !R.noCall ? `<button class="btn sm" aria-pressed="${R.lowData}" data-act="low">${icon('signal')}Low-data mode</button>` : ''}
 ${R.kind === 'call' ? `<span class="it grow">Reps: you ${R.reps} · ${esc(R.partnerName)} ${R.theirReps}</span><button class="btn gold sm" data-act="rep">Add a rep</button>` : ''}
 <button class="btn sm bad" data-act="leave">${icon('leave')}${R.kind === 'call' ? 'End workout' : 'Leave room'}</button>
 ${R.kind === 'session' && R.info.isHost ? '<button class="btn sm bad" data-act="endSession">End session for everyone</button>' : ''}`;
@@ -366,13 +371,28 @@ function leave(message) {
   go('home');
 }
 
+function noVideoHelp(e) {
+  const m = String(e?.message || e?.errorMsg || e || '');
+  return /webrtc|not supported|suppressed/i.test(m)
+    ? 'This browser blocks live video. Open fitvive.club in Safari (iPhone) or Chrome (Android or laptop) and try again.'
+    : m || 'The video connection failed. Try again.';
+}
+
 async function enterSession(session) {
   const camOn = $('#rm-cam') ? $('#rm-cam').checked : !S.profile.cam_off_default;
   const lowData = $('#rm-low') ? $('#rm-low').checked : S.profile.low_data;
   const info = await fn('video-token', { kind: 'session', sessionId: session.id });
   Object.assign(R, fresh(), { kind: 'session', sessionId: session.id, session, info, lowData });
   try { await connect({ url: info.url, token: info.token, camOn, micOn: !!info.isTrainer, autoSubscribe: false }); }
-  catch (e) { cleanup(); throw e; }
+  catch (e) {
+    // No live video in this browser (some privacy browsers and in-app browsers block it).
+    // If the session has a video, the member can still follow it. Otherwise, explain what to do.
+    if (!youtubeId(session.video_url)) { cleanup(); throw new Error(noVideoHelp(e)); }
+    const c = R.call; R.call = null;
+    if (c) { Promise.resolve(c.leave()).catch(() => {}).finally(() => { try { c.destroy(); } catch { /* ignore */ } }); }
+    Object.assign(R, { joined: true, noCall: true, cam: false, mic: false });
+    toast('Live video does not work in this browser, so you are following the session video only.');
+  }
   try {
     const t0 = Date.now();
     const serverNow = await q(sb.rpc('server_now'));
@@ -410,7 +430,7 @@ async function enterCall(callRow, name) {
   pending = null;
   Object.assign(R, fresh(), { kind: 'call', partnerName: name });
   try { await connect({ url: pass.url, token: pass.token, camOn: !S.profile.cam_off_default, micOn: true, autoSubscribe: true }); }
-  catch (e) { cleanup(); throw e; }
+  catch (e) { cleanup(); throw new Error(noVideoHelp(e)); }
   drawRoom();
 }
 
