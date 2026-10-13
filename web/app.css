@@ -267,3 +267,14 @@ main.enter>*:nth-child(n+4){animation-delay:.15s}
 .chatbox{gap:8px;max-height:min(58vh,520px);overflow-y:auto;padding-right:4px}
 .bubble .btime{display:block;margin-top:4px;font-size:11px;opacity:.7;text-align:right}
 .daysep{align-self:center;font-size:12px;color:var(--muted);padding:2px 12px;border-radius:10px;border:1px solid var(--line);margin:6px 0}
+
+/* ---------------------------------------------------------------- rep rounds */
+.bigcount{font:700 clamp(56px,16vw,88px)/1 var(--display);color:var(--gold);text-shadow:var(--tglow);font-variant-numeric:tabular-nums}
+.board{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.board li{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:14px;background:var(--lift);border:1px solid var(--line)}
+.board li strong{font:700 20px var(--display);color:var(--ivory);min-width:2.5ch;text-align:right;font-variant-numeric:tabular-nums}
+.board li .meta{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums}
+.board .pl{font-weight:700;color:var(--muted);min-width:3ch}
+.board li.top{border-color:var(--gold);box-shadow:var(--glow-sm)}
+.board li.top .pl{color:var(--gold);text-shadow:var(--tglow)}
+.board li.mine{background:rgba(255,170,40,.14)}
