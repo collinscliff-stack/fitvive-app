@@ -1,5 +1,6 @@
 // Live video: trainer-led rooms of six, and one-to-one partner workouts. Video runs on Daily.
 import { sb, S, uid, $, esc, ini, toast, q, fn, go, head, fmtTime, fmtDay, sessionState, stop, icon, youtubeId } from './core.js';
+import { createRepCounter } from './rep-counter.js';
 
 const FLAG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>';
 const REASONS = ['Recording or taking screenshots', 'Harassment', 'Inappropriate behaviour', 'Something else'];
@@ -11,8 +12,10 @@ export const setPendingCall = (pass) => { pending = pass; };
 
 const fresh = () => ({
   kind: '', call: null, joined: false, sessionId: null, session: null, info: null, roster: [], lowData: false,
-  mic: false, cam: true, rot: 0, called: {}, reporting: null, timers: [], channels: [], subs: {}, recvKey: '',
+  mic: false, cam: true, zoom: 1, zoomCaps: null, rot: 0, called: {}, reporting: null, timers: [], channels: [], subs: {}, recvKey: '',
   raf: 0, reps: 0, theirReps: 0, partnerName: '', wake: null, noCall: false,
+  repExercise: 'squat', repCount: 0, repStartedAt: 0, repDuration: 0, repCounter: null,
+  repRunning: false, repSaving: false, repSaved: false, repScores: {}, repPreviewStream: null,
   yt: null, ytId: '', ytReady: false, ytCheck: 0, skew: 0,
 });
 const R = fresh();
@@ -177,12 +180,47 @@ function drawHead() {
 function drawControls() {
   const el = $('#rm-controls'); if (!el) return;
   const member = R.kind === 'session' && !R.info.isHost;
+  const zoomOptions = [0.5, 1, 2, 2.5];
+  const zoomTrack = !R.noCall && R.joined ? currentLocalVideoTrack() : null;
+  let zoomCaps = null;
+  try { zoomCaps = zoomTrack?.getCapabilities?.()?.zoom ?? null; } catch { /* capabilities are optional */ }
+  R.zoomCaps = zoomCaps;
+  const zoomControls = !R.noCall && R.joined && R.cam ? `<div class="row" role="group" aria-label="Camera zoom" style="gap:6px;align-items:center"><span class="meta">Zoom</span>${zoomOptions.map((z) => {
+    const supported = !zoomCaps || (z >= Number(zoomCaps.min) && z <= Number(zoomCaps.max));
+    const label = `${z}x`;
+    return `<button class="btn sm ${Number(R.zoom) === z ? 'gold' : ''}" data-act="zoom" data-zoom="${z}" aria-pressed="${Number(R.zoom) === z}" ${supported ? '' : 'disabled title="This camera does not support this zoom level in this browser"'}>${label}</button>`;
+  }).join('')}</div>` : '';
   el.innerHTML = `${R.noCall ? '' : `<button class="btn sm" aria-pressed="${R.mic}" data-act="mic">${icon(R.mic ? 'mic' : 'micoff')}${R.mic ? 'Mic on' : 'Mic off'}</button>
 <button class="btn sm" aria-pressed="${R.cam}" data-act="cam">${icon(R.cam ? 'video' : 'videooff')}${R.cam ? 'Camera on' : 'Camera off'}</button>`}
+${zoomControls}
 ${member && !R.noCall ? `<button class="btn sm" aria-pressed="${R.lowData}" data-act="low">${icon('signal')}Low-data mode</button>` : ''}
 ${R.kind === 'call' ? `<span class="it grow">Reps: you ${R.reps} · ${esc(R.partnerName)} ${R.theirReps}</span><button class="btn gold sm" data-act="rep">Add a rep</button>` : ''}
 <button class="btn sm bad" data-act="leave">${icon('leave')}${R.kind === 'call' ? 'End workout' : 'Leave room'}</button>
 ${R.kind === 'session' && R.info.isHost ? '<button class="btn sm bad" data-act="endSession">End session for everyone</button>' : ''}`;
+}
+
+async function setCameraZoom(value) {
+  const zoom = Number(value);
+  if (![0.5, 1, 2, 2.5].includes(zoom)) return;
+  if (!R.joined || !R.cam) throw new Error('Turn your camera on before changing zoom.');
+  const track = currentLocalVideoTrack();
+  if (!track || track.readyState === 'ended') throw new Error('Your camera track is not ready. Turn your camera off and on, then try again.');
+  let caps = null;
+  try { caps = track.getCapabilities?.()?.zoom ?? null; } catch { /* optional browser API */ }
+  if (caps && (zoom < Number(caps.min) || zoom > Number(caps.max))) {
+    throw new Error(`${zoom}x zoom is not supported by this camera. Available range: ${caps.min}x–${caps.max}x.`);
+  }
+  if (typeof track.applyConstraints !== 'function') {
+    throw new Error('This browser does not expose camera zoom controls for this camera.');
+  }
+  try {
+    await track.applyConstraints({ advanced: [{ zoom }] });
+    R.zoom = zoom;
+    drawControls();
+    toast(`Camera zoom set to ${zoom}x.`);
+  } catch (error) {
+    throw new Error(`${zoom}x zoom is not available on this phone/browser. Try another zoom level or use the phone's supported camera settings.`);
+  }
 }
 
 function drawPanel() {
@@ -190,6 +228,161 @@ function drawPanel() {
   el.innerHTML = R.reporting
     ? `<section class="card"><h3>Report ${esc(R.reporting.name)}</h3><div class="field" style="flex:none"><label for="rp-why">What happened?</label><select id="rp-why">${REASONS.map((r) => `<option>${r}</option>`).join('')}</select></div><div class="row"><button class="btn gold sm" data-act="sendReport">Send report</button><button class="btn sm" data-act="cancelReport">Cancel</button></div></section>`
     : '';
+}
+
+
+// ---------------------------------------------------------------- browser-only exercise counter and room leaderboard
+const REP_EXERCISES = {
+  squat: { label: 'Squats', singular: 'squat' },
+  press_up: { label: 'Press-ups', singular: 'press-up' },
+  jumping_jack: { label: 'Jumping jacks', singular: 'jumping jack' },
+};
+const repExerciseLabel = (key) => REP_EXERCISES[key]?.label || 'Exercise';
+
+function currentLocalVideoTrack() {
+  const local = R.call?.participants?.()?.local;
+  const t = local?.tracks?.video;
+  if (!t || t.state !== 'playable') return null;
+  return t.persistentTrack || t.track || null;
+}
+
+function broadcastRepScore() {
+  if (R.kind !== 'session' || !R.call || !R.joined || R.info?.isHost) return;
+  const payload = {
+    type: 'fitvive-rep-score', sessionId: R.sessionId, roomNo: Number(R.info?.roomNo),
+    userId: uid(), name: String(S.profile?.display_name || S.profile?.full_name || 'Member').slice(0, 60),
+    exercise: R.repExercise, reps: R.repCount, sentAt: Date.now(),
+  };
+  try { R.call.sendAppMessage(payload, '*'); } catch { /* a temporary reconnect is harmless */ }
+  const key = `${payload.roomNo}:${payload.userId}`;
+  R.repScores[key] = { ...payload, sentAt: payload.sentAt };
+  updateRepPanel();
+}
+
+function drawRepPanel() {
+  const el = $('#rm-rep');
+  if (!el || R.kind !== 'session' || R.noCall) {
+    if (el) el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = `<section class="card rep-card">
+    <h3>Rep counter</h3>
+    <p class="meta">Choose an exercise, then start counting. Pose detection runs on this phone; only your exercise and count are shared. Keep your camera on and position your full body in view.</p>
+    <div class="row rep-exercises" role="group" aria-label="Choose exercise">
+      <button class="btn sm ${R.repExercise === 'squat' ? 'gold' : ''}" data-act="repExercise" data-exercise="squat" ${R.repRunning ? 'disabled' : ''}>Squats</button>
+      <button class="btn sm ${R.repExercise === 'press_up' ? 'gold' : ''}" data-act="repExercise" data-exercise="press_up" ${R.repRunning ? 'disabled' : ''}>Press-ups</button>
+      <button class="btn sm ${R.repExercise === 'jumping_jack' ? 'gold' : ''}" data-act="repExercise" data-exercise="jumping_jack" ${R.repRunning ? 'disabled' : ''}>Jumping jacks</button>
+    </div>
+    <div class="row" style="align-items:center;margin-top:12px">
+      <div class="grow"><div id="rm-rep-count" style="font-size:2rem;font-weight:700;font-variant-numeric:tabular-nums">${R.repCount}</div><div id="rm-rep-status" class="meta">Ready when you are.</div></div>
+      <button class="btn gold" id="rm-rep-start" data-act="repStart" ${R.repRunning ? 'hidden' : ''}>Start counting</button>
+      <button class="btn bad" id="rm-rep-stop" data-act="repStop" ${R.repRunning ? '' : 'hidden'} ${R.repSaving ? 'disabled' : ''}>Finish and save</button>
+    </div>
+    <video id="rm-rep-preview" muted playsinline autoplay hidden style="width:100%;max-width:360px;border-radius:12px;margin-top:12px;transform:scaleX(-1)"></video>
+    <div id="rm-rep-leaderboard" style="margin-top:16px"></div>
+    <p class="meta">Counts are estimates, not a form or medical assessment. Do the movement safely and stop if you feel pain, dizziness or unusual shortness of breath.</p>
+  </section>`;
+  updateRepPanel();
+}
+
+function updateRepPanel() {
+  const count = $('#rm-rep-count');
+  if (count) count.textContent = String(R.repCount);
+  const status = $('#rm-rep-status');
+  if (status) status.textContent = R.repSaving ? 'Saving your result…'
+    : R.repRunning ? `Counting ${repExerciseLabel(R.repExercise).toLowerCase()} · ${Math.max(0, Math.floor((Date.now() - R.repStartedAt) / 1000))} seconds`
+    : R.repSaved ? `Saved: ${R.repCount} ${repExerciseLabel(R.repExercise).toLowerCase()}.`
+    : 'Ready when you are.';
+  const start = $('#rm-rep-start'), finish = $('#rm-rep-stop');
+  if (start) start.hidden = R.repRunning;
+  if (finish) { finish.hidden = !R.repRunning; finish.disabled = R.repSaving; }
+  document.querySelectorAll('#rm-rep [data-act="repExercise"]').forEach((b) => {
+    b.disabled = R.repRunning || R.repSaving;
+    b.classList.toggle('gold', b.dataset.exercise === R.repExercise);
+  });
+  const board = $('#rm-rep-leaderboard');
+  if (!board) return;
+  const rows = Object.values(R.repScores).filter((s) => !R.info?.isHost ? Number(s.roomNo) === Number(R.info?.roomNo) : true);
+  rows.sort((a, b) => a.exercise.localeCompare(b.exercise) || b.reps - a.reps || a.name.localeCompare(b.name));
+  const grouped = Object.keys(REP_EXERCISES).map((exercise) => {
+    const entries = rows.filter((s) => s.exercise === exercise);
+    if (!entries.length) return '';
+    return `<div style="margin-top:10px"><h4>${esc(repExerciseLabel(exercise))}</h4><ol>${entries.map((s) =>
+      `<li style="display:flex;justify-content:space-between;gap:12px;padding:4px 0"><span>${esc(s.name)}${s.userId === uid() ? ' · You' : ''}</span><strong>${s.reps}</strong></li>`
+    ).join('')}</ol></div>`;
+  }).join('');
+  board.innerHTML = `<h3>Live room leaderboard</h3>${grouped || '<p class="meta">Scores appear here as members count reps.</p>'}`;
+}
+
+async function startRepCounter() {
+  if (R.kind !== 'session' || R.info?.isHost) return;
+  if (!R.joined || !R.call) throw new Error('Join the live room before starting the rep counter.');
+  const track = currentLocalVideoTrack();
+  if (!track || track.readyState === 'ended') throw new Error('Turn on your Fitvive camera first, then start the rep counter.');
+  const video = $('#rm-rep-preview');
+  if (!video) throw new Error('The rep counter panel is not ready. Reopen the room and try again.');
+  const startedSessionId = R.sessionId;
+  R.repCount = 0; R.repDuration = 0; R.repStartedAt = Date.now(); R.repSaved = false;
+  R.repPreviewStream = new MediaStream([track]);
+  video.srcObject = R.repPreviewStream;
+  video.hidden = false;
+  try { await video.play(); } catch { /* muted inline video usually plays without a gesture */ }
+  R.repRunning = true;
+  updateRepPanel();
+  try {
+    const counter = await createRepCounter(video, R.repExercise, (count) => {
+      if (!R.repRunning) return;
+      R.repCount = count;
+      broadcastRepScore();
+    });
+    if (R.sessionId !== startedSessionId || !R.joined || !R.repRunning) {
+      await counter.stop();
+      throw new Error('The room changed while the exercise model was loading. Start again from the live room.');
+    }
+    R.repCounter = counter;
+  } catch (error) {
+    R.repRunning = false;
+    R.repPreviewStream = null;
+    video.srcObject = null; video.hidden = true;
+    updateRepPanel();
+    throw error;
+  }
+  // Small, infrequent packets let people who join late catch the current count without video/data streaming.
+  R.repHeartbeat = setInterval(broadcastRepScore, 5000);
+  broadcastRepScore();
+  updateRepPanel();
+}
+
+async function finishRepCounter({ quiet = false } = {}) {
+  if (R.repSaving) return;
+  if (!R.repRunning && (!R.repCounter || R.repSaved)) return;
+  R.repSaving = true;
+  const sessionId = R.sessionId, exercise = R.repExercise, reps = R.repCount;
+  const durationSeconds = Math.min(10800, Math.max(0, Math.floor((Date.now() - (R.repStartedAt || Date.now())) / 1000)));
+  broadcastRepScore();
+  R.repRunning = false;
+  clearInterval(R.repHeartbeat); R.repHeartbeat = 0;
+  try { await R.repCounter?.stop?.(); } catch { /* dispose best-effort */ }
+  R.repCounter = null;
+  const video = $('#rm-rep-preview');
+  if (video) { video.pause?.(); video.srcObject = null; video.hidden = true; }
+  R.repPreviewStream = null;
+  try {
+    if (sessionId && reps >= 0 && durationSeconds > 0) {
+      await q(sb.rpc('save_exercise_result', {
+        p_session: sessionId, p_exercise: exercise, p_reps: reps, p_duration_seconds: durationSeconds,
+      }));
+    }
+    R.repSaved = true;
+    R.repDuration = durationSeconds;
+    if (!quiet) toast(`Saved ${reps} ${repExerciseLabel(exercise).toLowerCase()}.`);
+  } catch (error) {
+    if (!quiet) toast(`Could not save your result: ${error.message}`);
+    else console.warn('Fitvive rep result could not be saved:', error);
+  } finally {
+    R.repSaving = false;
+    updateRepPanel();
+  }
 }
 
 function drawHostPanel() {
@@ -203,6 +396,7 @@ const skeleton = () => `<div id="rm-head"></div>
 <section class="stage" ${R.kind === 'call' ? 'style="grid-template-columns:minmax(0,1fr)"' : ''}>${R.kind === 'call' ? '' : '<div id="rm-yt-wrap" class="tile yt" hidden></div><div id="rm-big" style="min-width:0"></div>'}<div id="rm-grid" class="mgrid" ${R.kind === 'call' ? 'style="grid-template-columns:repeat(2,minmax(0,1fr))"' : ''}></div>${R.kind === 'call' ? '<div id="rm-big" hidden></div>' : ''}</section>
 <p id="rm-note" class="meta" hidden></p>
 <div id="rm-panel"></div>
+<div id="rm-rep"></div>
 <div id="rm-controls" class="row"></div>
 <div id="rm-video"></div>
 <div id="rm-host" class="stack"></div>
@@ -211,7 +405,7 @@ const skeleton = () => `<div id="rm-head"></div>
 
 function drawRoom() {
   $('#main').innerHTML = skeleton();
-  drawHead(); drawControls(); drawPanel(); drawVideoPanel(); drawHostPanel(); sync();
+  drawHead(); drawControls(); drawPanel(); drawRepPanel(); drawVideoPanel(); drawHostPanel(); sync();
   if (R.kind === 'session') applyVideo();
 }
 
@@ -346,7 +540,26 @@ async function connect({ url, token, camOn, micOn, autoSubscribe }) {
   call.on('camera-error', () => toast('Your camera or microphone is blocked. Allow it in your browser settings.'));
   call.on('error', (e) => { if (R.joined) leave(e?.errorMsg || 'The video connection was lost.'); });
   call.on('left-meeting', () => { if (R.joined) leave('The room has closed.'); });
-  call.on('app-message', (e) => { if (typeof e?.data?.reps === 'number') { R.theirReps = e.data.reps; drawControls(); } });
+  call.on('app-message', (e) => {
+    const d = e?.data;
+    // Keep the legacy partner-workout rep message working.
+    if (typeof d?.reps === 'number' && d?.type !== 'fitvive-rep-score') { R.theirReps = d.reps; drawControls(); return; }
+    if (d?.type !== 'fitvive-rep-score' || R.kind !== 'session' || d.sessionId !== R.sessionId) return;
+    const mine = uid();
+    // Members only see scores from their room. The trainer/admin is the shared host across rooms.
+    if (!R.info?.isHost && Number(d.roomNo) !== Number(R.info?.roomNo)) return;
+    if (!d.userId || d.userId === mine || !['squat', 'press_up', 'jumping_jack'].includes(d.exercise)) return;
+    const key = `${d.roomNo}:${d.userId}`;
+    const previous = R.repScores[key];
+    if (previous && Number(d.sentAt || 0) < Number(previous.sentAt || 0)) return;
+    R.repScores[key] = {
+      userId: d.userId, name: String(d.name || 'Member').slice(0, 60),
+      roomNo: Number(d.roomNo), exercise: d.exercise,
+      reps: Math.max(0, Math.min(10000, Math.floor(Number(d.reps) || 0))),
+      sentAt: Number(d.sentAt) || Date.now(),
+    };
+    updateRepPanel();
+  });
   await call.join({ url, token, startVideoOff: !camOn, startAudioOff: !micOn });
   try { await call.updateSendSettings({ video: 'bandwidth-optimized' }); } catch { /* older browsers */ }
   R.cam = camOn; R.mic = micOn; R.joined = true;
@@ -362,16 +575,20 @@ async function loadRoster() {
 }
 
 function cleanup() {
+  // Finish the save before marking the member as having left, so the RPC can verify their session membership.
+  const savePromise = R.kind === 'session' && R.repRunning && !R.repSaved
+    ? finishRepCounter({ quiet: true }) : Promise.resolve();
   const { call, sessionId, joined } = R;
   R.joined = false;
   R.timers.forEach(clearInterval);
+  clearInterval(R.repHeartbeat);
   R.channels.forEach((c) => sb.removeChannel(c));
   cancelAnimationFrame(R.raf);
   clearTimeout(R.ytCheck);
   try { R.yt?.destroy(); } catch { /* ignore */ }
   try { R.wake?.release(); } catch { /* ignore */ }
   if (call) { Promise.resolve(call.leave()).catch(() => {}).finally(() => { try { call.destroy(); } catch { /* ignore */ } }); }
-  if (sessionId && joined) sb.rpc('leave_session', { p_session: sessionId }).then(() => {}, () => {});
+  if (sessionId && joined) Promise.resolve(savePromise).catch(() => {}).finally(() => sb.rpc('leave_session', { p_session: sessionId }).then(() => {}, () => {}));
   Object.assign(R, fresh());
 }
 
@@ -447,6 +664,7 @@ async function enterCall(callRow, name) {
 const common = {
   mic() { R.mic = !R.mic; R.call?.setLocalAudio(R.mic); drawControls(); },
   cam() { R.cam = !R.cam; R.call?.setLocalVideo(R.cam); drawControls(); kick(); },
+  zoom(el) { return setCameraZoom(Number(el.dataset.zoom)); },
   leave() { leave(R.kind === 'call' ? 'Workout ended.' : 'You left the room.'); },
 };
 
@@ -487,6 +705,12 @@ ${host ? '' : `<label class="check" for="rm-low"><input type="checkbox" id="rm-l
       ...common,
       enter: (_, data) => enterSession(data.session),
       low() { R.lowData = !R.lowData; drawControls(); kick(); },
+      repExercise(el) {
+        if (R.repRunning || !REP_EXERCISES[el.dataset.exercise]) return;
+        R.repExercise = el.dataset.exercise; R.repCount = 0; R.repSaved = false; updateRepPanel();
+      },
+      async repStart() { await startRepCounter(); },
+      async repStop() { await finishRepCounter(); },
       next() { R.rot++; kick(); },
       ytstart() { try { R.yt?.unMute(); R.yt?.playVideo(); } catch { /* not ready */ } ytMessage(''); setTimeout(applyVideo, 800); },
       ytplay() {
@@ -508,6 +732,7 @@ ${host ? '' : `<label class="check" for="rm-low"><input type="checkbox" id="rm-l
       },
       async endSession() {
         const id = R.sessionId;
+        if (R.repRunning) await finishRepCounter({ quiet: true });
         await q(sb.rpc('end_session', { p_session: id }));
         leave('Session ended in every room.');
       },
