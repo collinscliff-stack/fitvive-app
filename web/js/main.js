@@ -17,6 +17,7 @@ async function loadProfile() {
   S.profile = await q(sb.from('profiles').select('*').eq('id', uid()).maybeSingle());
   if (S.profile?.status === 'approved') {
     S.access = !!(await q(sb.rpc('has_access', { p_user: uid() })));
+    try { S.timeBilling = !!(await q(sb.from('app_settings').select('value').eq('key', 'access').maybeSingle()))?.value?.time_billing; } catch { S.timeBilling = false; }
     if (S.profile.company_id) S.company = await q(sb.from('companies').select('*').eq('id', S.profile.company_id).maybeSingle());
   }
 }

@@ -582,6 +582,7 @@ async function enterSession(session) {
   R.timers.push(setInterval(async () => {
     try {
       const room = await q(sb.rpc('heartbeat', { p_session: R.sessionId }));
+      if (room === -1) { leave('Your training time has run out. Top up to keep training.'); return; }
       if (room === null) await q(sb.rpc('join_session', { p_session: R.sessionId }));
     } catch { /* try again next time */ }
     loadRoster();

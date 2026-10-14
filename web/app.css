@@ -278,3 +278,4 @@ main.enter>*:nth-child(n+4){animation-delay:.15s}
 .board li.top{border-color:var(--gold);box-shadow:var(--glow-sm)}
 .board li.top .pl{color:var(--gold);text-shadow:var(--tglow)}
 .board li.mine{background:rgba(255,170,40,.14)}
+.bigtime{font:700 clamp(30px,8vw,42px)/1.1 var(--display);color:var(--gold);text-shadow:var(--tglow)}

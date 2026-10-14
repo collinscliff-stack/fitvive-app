@@ -209,6 +209,13 @@ export function avatar(card, url, size = 'md') {
   return `<span class="pic ${size}">${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : `<span>${esc(ini(card.display_name || card.name || ''))}</span>`}${dot}</span>`;
 }
 
+// Training time, shown as "12 h 30 min".
+export function hm(seconds) {
+  const m = Math.max(0, Math.floor((seconds || 0) / 60));
+  const h = Math.floor(m / 60);
+  return h ? `${h} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`;
+}
+
 export function placeOf(c) { return [c.area, c.state].filter(Boolean).join(', '); }
 
 export function seen(c) {

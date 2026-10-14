@@ -1,5 +1,5 @@
 // Screens for trainers, company admins and club admins.
-import { sb, S, uid, app, $, esc, toast, q, fn, head, emptyRow, sessionRow, loadSessions, fmtTime, fmtDay, fmtDate, naira, cap, stop, TYPE_LABEL, youtubeId } from './core.js';
+import { sb, S, uid, app, $, esc, toast, q, fn, head, emptyRow, sessionRow, loadSessions, fmtTime, fmtDay, fmtDate, naira, cap, stop, TYPE_LABEL, youtubeId, hm } from './core.js';
 
 const ui = { viewing: null, search: '' };
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
@@ -149,11 +149,21 @@ ${a.id_doc_path ? `<button class="btn sm" data-act="viewId" data-id="${a.id}" da
         return `<li class="item"><div class="grow"><div class="it">${esc(m.full_name)} ${statusTag(m.status)}</div><div class="meta">${esc(m.email)} · ${esc(m.phone)} · ${paid ? 'Paid until ' + fmtDate(sub.current_period_end) : 'No paid plan'}</div></div>
 ${sel(m, 'role', ['member', 'trainer', 'company_admin', 'admin'])}${sel(m, 'gender', ['female', 'male', 'unspecified'])}
 <button class="btn sm" data-act="grant" data-id="${m.id}">Add 30 days</button>
+<form class="row" data-form="addtime" data-id="${m.id}" style="gap:6px;align-items:center;flex-wrap:nowrap"><span class="meta" style="white-space:nowrap">${hm(m.seconds_left)} left</span><input type="number" inputmode="numeric" aria-label="Minutes to add for ${esc(m.full_name)}" placeholder="Minutes" style="width:110px;min-height:44px"><button class="btn sm gold" type="submit">Add</button></form>
 ${m.status === 'approved' ? `<button class="btn sm" data-act="status" data-id="${m.id}" data-to="suspended">Suspend</button>` : `<button class="btn sm" data-act="status" data-id="${m.id}" data-to="approved">${m.status === 'suspended' ? 'Restore' : 'Approve'}</button>`}
 ${m.status !== 'removed' && m.id !== uid() ? `<button class="btn sm bad" data-act="status" data-id="${m.id}" data-to="removed">Remove</button>` : ''}</li>`;
       }).join('') || emptyRow('No members match.')}</ul></section>`;
     },
-    forms: { search() { ui.search = $('#am-q').value.trim(); return app.refresh(); } },
+    forms: {
+      search() { ui.search = $('#am-q').value.trim(); return app.refresh(); },
+      async addtime(form) {
+        const mins = parseInt(form.querySelector('input').value, 10);
+        if (!mins) throw new Error('Type the number of minutes to add (for example 60). Use a minus sign to take minutes back.');
+        const left = await q(sb.rpc('add_minutes', { p_user: form.dataset.id, p_minutes: mins, p_note: 'Added by admin' }));
+        toast(`${mins > 0 ? 'Added' : 'Removed'} ${Math.abs(mins)} minutes. Balance: ${hm(left * 60)}.`);
+        await app.refresh();
+      },
+    },
     changes: {
       async role(el) { await q(sb.from('profiles').update({ role: el.value }).eq('id', el.dataset.id)); toast('Role saved.'); },
       async gender(el) { await q(sb.from('profiles').update({ gender: el.value }).eq('id', el.dataset.id)); toast('Saved.'); },
@@ -280,7 +290,8 @@ ${m.status !== 'removed' && m.id !== uid() ? `<button class="btn sm bad" data-ac
       const p = (k) => plans.find((x) => x.key === k) || { amount_kobo: 0 };
       const fee = (k, label) => `<div class="field"><label for="fee-${k}">${label} (₦)</label><input type="number" id="fee-${k}" min="0" step="1" value="${p(k).amount_kobo / 100}"></div>`;
       return `${head('Club admin', 'Fees and <i>access.</i>')}
-<section class="card"><h3>Who can join rooms</h3><label class="check" for="fa-paid"><input type="checkbox" id="fa-paid" data-change="paid" ${access.free_access ? '' : 'checked'}><span>Require a paid membership or a company seat</span></label><p class="meta">While this is off, every approved member can join for free. Switch it on once fees are set and Paystack is connected.</p></section>
+<section class="card"><h3>Who can join rooms</h3><label class="check" for="fa-paid"><input type="checkbox" id="fa-paid" data-change="paid" ${access.free_access ? '' : 'checked'}><span>Require a paid membership or a company seat</span></label><p class="meta">While this is off, every approved member can join for free. Switch it on once fees are set and Paystack is connected.</p>
+<label class="check" for="fa-time"><input type="checkbox" id="fa-time" data-change="timebill" ${access.time_billing ? 'checked' : ''}><span>Charge by training time: members need minutes in their balance to join, and sessions use them up</span></label><p class="meta">Add minutes to members in Members. Trainers, admins and company staff are not charged. This setting overrides the one above.</p></section>
 <section class="card"><h3>Fees</h3><form class="stack" data-form="fees"><div class="row" style="align-items:flex-start">${fee('monthly', 'Member, monthly')}${fee('yearly', 'Member, yearly')}</div><div class="row" style="align-items:flex-start">${fee('company_seat_monthly', 'Company seat, monthly')}${fee('company_seat_yearly', 'Company seat, yearly')}</div>
 <div class="row" style="align-items:flex-start"><div class="field"><label for="pc-monthly">Paystack plan code, monthly (optional)</label><input type="text" id="pc-monthly" value="${esc(p('monthly').paystack_plan_code || '')}" placeholder="PLN_..."></div><div class="field"><label for="pc-yearly">Paystack plan code, yearly (optional)</label><input type="text" id="pc-yearly" value="${esc(p('yearly').paystack_plan_code || '')}" placeholder="PLN_..."></div></div>
 <p class="meta">Without a plan code, members pay once per period and renew by hand. With a plan code from Paystack, their card renews automatically. The plan amount in Paystack must match the fee here.</p>
@@ -289,8 +300,15 @@ ${m.status !== 'removed' && m.id !== uid() ? `<button class="btn sm bad" data-ac
 <form class="row" data-form="code" style="align-items:flex-start"><div class="field"><label for="dc-code">Code</label><input type="text" id="dc-code" placeholder="FOUNDER" maxlength="30"></div><div class="field" style="flex:0 1 120px"><label for="dc-pct">% off</label><input type="number" id="dc-pct" min="1" max="100" value="30"></div><div class="field" style="flex:0 1 140px"><label for="dc-max">Uses allowed</label><input type="number" id="dc-max" min="1" value="100"></div><button class="btn gold sm" type="submit" style="align-self:flex-end">Add code</button></form></section>`;
     },
     changes: {
+      async timebill(el) {
+        const cur = (await q(sb.from('app_settings').select('value').eq('key', 'access').maybeSingle()))?.value || {};
+        await q(sb.from('app_settings').upsert({ key: 'access', value: { ...cur, time_billing: el.checked } }));
+        S.timeBilling = el.checked;
+        toast(el.checked ? 'Members now use training time. Add minutes in Members.' : 'Charging by time is off.');
+      },
       async paid(el) {
-        await q(sb.from('app_settings').upsert({ key: 'access', value: { free_access: !el.checked } }));
+        const cur = (await q(sb.from('app_settings').select('value').eq('key', 'access').maybeSingle()))?.value || {};
+        await q(sb.from('app_settings').upsert({ key: 'access', value: { ...cur, free_access: !el.checked } }));
         toast(el.checked ? 'Paid membership is now required.' : 'Rooms are free for approved members.');
       },
     },

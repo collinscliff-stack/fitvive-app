@@ -1,4 +1,5 @@
 // Member screens: home, timetable, games, partners, ranking, membership and settings.
+import { hm } from './core.js';
 import { sb, S, uid, app, $, esc, toast, q, fn, go, head, emptyRow, sessionRow, sessionState, loadSessions, fmtDay, fmtTime, fmtDate, naira, dayKey, TYPE_LABEL, icon, menu, canHost } from './core.js';
 import { setPendingCall } from './room.js';
 
@@ -84,7 +85,12 @@ export const views = {
         ? `<section class="card glow hero"><div class="row">${st === 'live' ? '<span class="tag live">Live now</span>' : `<span class="eyebrow">${st === 'open' ? 'Starting soon' : 'Next session'}</span>`}</div><h2>${esc(next.title)} with <i>${esc(next.trainer_name)}</i></h2><p class="lede">${fmtDay(next.starts_at)}, ${fmtTime(next.starts_at)}. ${next.duration_min} minutes.</p><div class="row">${joinable || canHost(next) ? `<a class="btn gold" href="#/room/${next.id}">${icon('play')}${joinable ? 'Join the room' : 'Open the room'}</a>` : ''}<a class="btn" href="#/timetable">${icon('calendar')}See the timetable</a></div></section>`
         : `<section class="card glow hero">${head('Welcome' + (first ? ', ' + first : ''), 'No sessions are <i>scheduled</i> yet.', 'The club is setting up the timetable. Check back soon.')}</section>`;
       const today = sessions.filter((s) => dayKey(s.starts_at) === dayKey(new Date()));
+      const staff = ['admin', 'trainer'].includes(S.profile.role);
+      const left = S.profile.seconds_left || 0;
+      const timeCard = (S.timeBilling || left > 0) && !staff
+        ? `<section class="card ${left < 3600 ? 'glow' : ''}"><div class="row"><span class="grow"><span class="eyebrow">Training time left</span><br><span class="bigtime">${hm(left)}</span></span>${left < 3600 ? '<a class="btn gold sm" href="#/membership">Top up</a>' : ''}</div><p class="meta">Live sessions use your time minute by minute. Messages, partners and rankings are free.</p></section>` : '';
       return `${hero}
+${timeCard}
 <section class="cols quad">
 <div class="card stat">${icon('flame')}<div class="num">${stats.streak}</div><h3>${stats.streak === 1 ? 'day' : 'days'} in a row</h3><p class="meta">${stats.streak ? 'Train today to keep it going.' : 'Join a session to start your streak.'}</p></div>
 <div class="card stat">${icon('trophy')}<div class="num">${stats.rank ? ordinal(stats.rank) : stats.minutes}</div><h3>${stats.rank ? 'place this week' : 'minutes this week'}</h3><p class="meta">${stats.rank ? stats.minutes + ' minutes trained. ' : ''}<a href="#/ranking">See the ranking</a></p></div>
@@ -246,6 +252,7 @@ ${requests}${list}${panel}`;
       const coActive = S.company?.active_until && new Date(S.company.active_until) > new Date();
       let status;
       if (['admin', 'trainer'].includes(S.profile.role)) status = ['Staff access', 'Trainers and admins do not pay.'];
+      else if (S.timeBilling && !coActive) status = (S.profile.seconds_left || 0) > 0 ? ['Active', `You have ${hm(S.profile.seconds_left)} of training time left.`] : ['Not active', 'You have no training time left. Ask the club to add minutes.'];
       else if (subActive) status = ['Active', `Your ${esc(sub.plan_key || '')} membership runs until ${fmtDate(sub.current_period_end)}.`];
       else if (coActive) status = ['Covered by your company', `${esc(S.company.name)} pays for your seat until ${fmtDate(S.company.active_until)}.`];
       else if (access.free_access) status = ['Free access', 'The club has not switched on paid membership yet, so every approved member can join.'];
