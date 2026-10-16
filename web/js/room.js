@@ -235,7 +235,18 @@ function drawPanel() {
 // The coach starts a round for everyone. Each member's phone counts their reps on the phone itself
 // (no video leaves the phone for this) and reports the count. When the coach completes the round,
 // the results are final: most reps first, then the quickest time.
-const REP_EX = { squat: 'Squats', press_up: 'Press-ups', jumping_jack: 'Jumping jacks' };
+const REP_EX = { squat: 'Squats', press_up: 'Press-ups', jumping_jack: 'Jumping jacks', bicep_curl: 'Bicep curls', shoulder_press: 'Shoulder press', lateral_raise: 'Lateral raises', chest_press: 'Chest press', bench_press: 'Bench press (beta)' };
+// Where members should put their phone so the camera can count each exercise.
+const REP_TIP = {
+  squat: 'Stand back so your whole body is in view.',
+  press_up: 'Put the phone on the floor beside you, side-on, so your arms and body are in view.',
+  jumping_jack: 'Stand back so your whole body, arms up, is in view.',
+  bicep_curl: 'Face the phone with your head, arms and hands in view. Curl all the way up, then straighten fully.',
+  shoulder_press: 'Face the phone with room above your head. Push both hands fully overhead, then back to your shoulders.',
+  lateral_raise: 'Face the phone, arms in view. Raise both arms out to shoulder height, then lower to your sides.',
+  chest_press: 'Turn side-on to the phone. Push your hands straight out from your chest until your arms are straight, then bring them back.',
+  bench_press: 'Place the phone beside the bench at bench height, side-on. Lower to your chest, then push until your arms are straight.',
+};
 const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.max(0, Math.floor(s % 60))).padStart(2, '0')}`;
 
 function currentLocalVideoTrack() {
@@ -280,7 +291,7 @@ async function startCounting() {
   if (!r || R.countingRound === r.id || R.repStarting) return;
   if (R.noCall) { R.repMsg = 'This browser blocks the camera, so your reps cannot be counted here. Use Safari on iPhone or Chrome on Android.'; return; }
   const track = currentLocalVideoTrack();
-  if (!R.cam || !track || track.readyState === 'ended') { R.repMsg = 'Turn your camera on to be counted. Stand back so your whole body is in view.'; return; }
+  if (!R.cam || !track || track.readyState === 'ended') { R.repMsg = 'Turn your camera on to be counted.'; return; }
   R.repStarting = true; R.repMsg = 'Getting ready to count…'; drawRepPanel();
   try {
     if (R.counter) { try { await R.counter.stop(); } catch { /* already stopped */ } R.counter = null; }
@@ -349,7 +360,7 @@ ${open ? `<p>Counting <b>${REP_EX[r.exercise]}</b> for everyone. Members with th
     el.innerHTML = r || R.repMsg ? `<section class="card rep-card">${open ? `<p class="eyebrow">Coach started: ${REP_EX[r.exercise]}</p>
 <div class="row" style="align-items:flex-end"><span class="bigcount" id="rm-my-reps">${R.myReps}</span><span class="meta grow">your reps · <span id="rm-my-time">${R.countStart && R.countingRound ? mmss((Date.now() - R.countStart) / 1000) : '0:00'}</span></span></div>` : ''}
 ${R.repMsg ? `<p class="${R.countingRound ? 'meta' : 'err'}">${esc(R.repMsg)}</p>${open && !R.repStarting && !R.countingRound ? '<div class="row"><button class="btn sm" data-act="repRetry">Try again</button></div>' : ''}` : ''}
-${open && R.countingRound ? '<p class="meta">Keep your whole body in view. Your phone counts; only the number is shared. Stop if you feel pain or dizziness.</p>' : ''}
+${open ? `<p class="meta">${esc(REP_TIP[r.exercise] || '')} Your phone counts; only the number is shared. Stop if you feel pain or dizziness.</p>` : ''}
 <div id="rm-results"></div></section>` : '';
   }
   drawResults();

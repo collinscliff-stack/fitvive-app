@@ -96,12 +96,91 @@ function jumpingJackOpen(k) {
   return null;
 }
 
+// ---------------------------------------------------------------- arm exercises
+// Elbow angle of the arm the camera sees best (shoulder, elbow, wrist): used for presses seen side-on.
+function bestElbow(k) {
+  const sides = [['left_shoulder', 'left_elbow', 'left_wrist'], ['right_shoulder', 'right_elbow', 'right_wrist']]
+    .filter(([s, e, w]) => good(k[s], k[e], k[w]))
+    .map(([s, e, w]) => ({ a: angle(k[s], k[e], k[w]), score: (k[s].score ?? 1) + (k[e].score ?? 1) + (k[w].score ?? 1), s: k[s], e: k[e], w: k[w] }));
+  if (!sides.length) return null;
+  return sides.sort((x, y) => y.score - x.score)[0];
+}
+// Shoulder press, front-on: both wrists above the head (up) or back near the shoulders (down).
+function shoulderPressState(k) {
+  if (!good(k.left_shoulder, k.right_shoulder, k.left_wrist, k.right_wrist)) return null;
+  const sw = Math.max(1, distance(k.left_shoulder, k.right_shoulder));
+  const sy = (k.left_shoulder.y + k.right_shoulder.y) / 2;
+  const top = good(k.nose) ? k.nose.y - sw * 0.35 : sy - sw * 0.9;
+  if (k.left_wrist.y < top && k.right_wrist.y < top) return 'up';
+  if (k.left_wrist.y > sy - sw * 0.8 && k.right_wrist.y > sy - sw * 0.8) return 'down';
+  return null;
+}
+// Lateral raise, front-on: both arms out to shoulder height (up) or back down by the sides (down).
+function lateralRaiseState(k) {
+  if (!good(k.left_shoulder, k.right_shoulder, k.left_wrist, k.right_wrist)) return null;
+  const sw = Math.max(1, distance(k.left_shoulder, k.right_shoulder));
+  const sy = (k.left_shoulder.y + k.right_shoulder.y) / 2;
+  const spread = Math.abs(k.left_wrist.x - k.right_wrist.x);
+  if (k.left_wrist.y < sy + sw * 0.3 && k.right_wrist.y < sy + sw * 0.3 && spread > sw * 2.2) return 'up';
+  if (k.left_wrist.y > sy + sw * 0.9 && k.right_wrist.y > sy + sw * 0.9 && spread < sw * 1.6) return 'down';
+  return null;
+}
+
+export const EXERCISES = ['squat', 'press_up', 'jumping_jack', 'bicep_curl', 'shoulder_press', 'lateral_raise', 'chest_press', 'bench_press'];
+
+// One frame of key points in, true out when a rep has just been completed. Kept separate so it can be tested.
+export function makeStepper(exercise) {
+  let phase = exercise === 'jumping_jack' ? 'closed' : ['shoulder_press', 'lateral_raise'].includes(exercise) ? 'down' : ['chest_press', 'bench_press', 'bicep_curl'].includes(exercise) ? 'ext' : 'up';
+  return (k) => {
+    let next = null;
+    if (exercise === 'squat') {
+      const value = squatSignal(k);
+      if (value !== null) {
+        if (phase === 'up' && value < 105) phase = 'down';
+        else if (phase === 'down' && value > 150) { phase = 'up'; next = true; }
+      }
+    } else if (exercise === 'press_up') {
+      const value = pressUpSignal(k);
+      if (value !== null) {
+        if (phase === 'up' && value < 95) phase = 'down';
+        else if (phase === 'down' && value > 155) { phase = 'up'; next = true; }
+      }
+    } else if (exercise === 'bicep_curl') {
+      // A rep: arm straight, curled up past 60 degrees, and straight again.
+      const value = pressUpSignal(k);
+      if (value !== null) {
+        if (phase === 'ext' && value < 60) phase = 'bent';
+        else if (phase === 'bent' && value > 140) { phase = 'ext'; next = true; }
+      }
+    } else if (exercise === 'chest_press' || exercise === 'bench_press') {
+      // A rep: hands in at the chest (elbow bent), then pushed out until the arm is straight.
+      const arm = bestElbow(k);
+      if (arm) {
+        const upper = Math.max(1, distance(arm.s, arm.e));
+        const level = exercise === 'bench_press' || Math.abs(arm.w.y - arm.s.y) < upper * 0.9;
+        if (phase === 'ext' && arm.a < 95) phase = 'bent';
+        else if (phase === 'bent' && arm.a > 150 && level) { phase = 'ext'; next = true; }
+      }
+    } else if (exercise === 'shoulder_press' || exercise === 'lateral_raise') {
+      // A rep: arms up (overhead, or out to the sides), then back down.
+      const st = exercise === 'shoulder_press' ? shoulderPressState(k) : lateralRaiseState(k);
+      if (st === 'up' && phase === 'down') phase = 'up';
+      else if (st === 'down' && phase === 'up') { phase = 'down'; next = true; }
+    } else {
+      const open = jumpingJackOpen(k);
+      if (open === true && phase === 'closed') phase = 'open';
+      else if (open === false && phase === 'open') { phase = 'closed'; next = true; }
+    }
+  return !!next;
+  };
+}
+
 export async function createRepCounter(video, exercise, onCount) {
   if (!video || !onCount) throw new Error('The rep counter is missing its video or count handler.');
-  if (!['squat', 'press_up', 'jumping_jack'].includes(exercise)) throw new Error('Choose a supported exercise.');
+  if (!EXERCISES.includes(exercise)) throw new Error('Choose a supported exercise.');
   const detector = await loadModel();
   let stopped = false, busy = false, raf = 0, count = 0, lastRun = 0;
-  let phase = exercise === 'jumping_jack' ? 'closed' : 'up';
+  const step = makeStepper(exercise);
   const interval = 170; // roughly 5–6 inferences per second for mid-range phones
   const run = async (now) => {
     if (stopped) return;
@@ -110,25 +189,7 @@ export async function createRepCounter(video, exercise, onCount) {
     lastRun = now; busy = true;
     try {
       const poses = await detector.estimatePoses(video, { maxPoses: 1, flipHorizontal: false });
-      const k = getPoints(poses?.[0]);
-      let next = null;
-      if (exercise === 'squat') {
-        const value = squatSignal(k);
-        if (value !== null) {
-          if (phase === 'up' && value < 105) phase = 'down';
-          else if (phase === 'down' && value > 150) { phase = 'up'; next = true; }
-        }
-      } else if (exercise === 'press_up') {
-        const value = pressUpSignal(k);
-        if (value !== null) {
-          if (phase === 'up' && value < 95) phase = 'down';
-          else if (phase === 'down' && value > 155) { phase = 'up'; next = true; }
-        }
-      } else {
-        const open = jumpingJackOpen(k);
-        if (open === true && phase === 'closed') phase = 'open';
-        else if (open === false && phase === 'open') { phase = 'closed'; next = true; }
-      }
+      const next = step(getPoints(poses?.[0]));
       if (next) { count += 1; onCount(count); }
     } catch (error) {
       // A single missed frame should not end the workout. The next inference will retry.
